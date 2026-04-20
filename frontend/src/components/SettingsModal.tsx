@@ -36,6 +36,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   "agentic-press": "Agentic Press LLM",
   anthropic: "Anthropic",
   openai: "OpenAI",
+  openrouter: "OpenRouter",
   gemini: "Google Gemini",
   dashscope: "Alibaba DashScope",
   ollama: "Ollama",
