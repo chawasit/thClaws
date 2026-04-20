@@ -37,7 +37,7 @@ pub enum SlashCommand {
     Clear,
     History,
     Model(String),
-    Models { all: bool },
+    Models,
     Provider(String),
     Providers,
     Config {
@@ -267,9 +267,7 @@ pub fn parse_slash(input: &str) -> Option<SlashCommand> {
         "clear" => SlashCommand::Clear,
         "history" => SlashCommand::History,
         "model" => SlashCommand::Model(args.to_string()),
-        "models" => SlashCommand::Models {
-            all: args.trim() == "all",
-        },
+        "models" => SlashCommand::Models,
         "provider" => SlashCommand::Provider(args.to_string()),
         "providers" => SlashCommand::Providers,
         "config" => match args.split_once('=') {
@@ -415,8 +413,7 @@ pub fn render_help() -> &'static str {
      /clear            Clear conversation history\n  \
      /history          Print message-history summary\n  \
      /model [NAME]     Show current model, or switch to NAME\n  \
-     /models           List models from the current provider (capped at 30 for OpenRouter)\n  \
-     /models all       List every model the provider reports (OpenRouter only — others unchanged)\n  \
+     /models           List models available from the current provider\n  \
      /provider NAME    Switch provider to its default model\n  \
      /providers        List all supported providers + defaults\n  \
      /config key=val   Set a config value (session-only for now)\n  \
@@ -1914,42 +1911,22 @@ pub async fn run_repl(mut config: AppConfig) -> Result<()> {
                         config.model, session.id
                     );
                 }
-                SlashCommand::Models { all } => {
+                SlashCommand::Models => {
                     // Build a fresh provider from current config and query it.
-                    const DEFAULT_LIMIT: usize = 30;
-                    // Only cap model lists for providers with huge catalogs
-                    // (OpenRouter has 300+ models). Other providers return
-                    // small curated lists that are always useful in full.
-                    let limit_applies =
-                        matches!(config.detect_provider(), Ok("openrouter"));
                     match build_provider(&config) {
                         Ok(p) => match p.list_models().await {
                             Ok(models) if models.is_empty() => {
                                 println!("{COLOR_DIM}no models returned{COLOR_RESET}")
                             }
                             Ok(models) => {
-                                let total = models.len();
-                                let should_truncate =
-                                    !all && limit_applies && total > DEFAULT_LIMIT;
-                                let show: Vec<_> = if should_truncate {
-                                    models.into_iter().take(DEFAULT_LIMIT).collect()
-                                } else {
-                                    models.into_iter().collect()
-                                };
-                                for m in &show {
-                                    match &m.display_name {
+                                for m in models {
+                                    match m.display_name {
                                         Some(dn) => println!(
                                             "{COLOR_DIM}  {} — {}{COLOR_RESET}",
                                             m.id, dn
                                         ),
                                         None => println!("{COLOR_DIM}  {}{COLOR_RESET}", m.id),
                                     }
-                                }
-                                if should_truncate {
-                                    println!(
-                                        "{COLOR_DIM}  … and {} more — use /models all to see everything{COLOR_RESET}",
-                                        total - DEFAULT_LIMIT
-                                    );
                                 }
                             }
                             Err(e) => {
@@ -3177,14 +3154,7 @@ mod tests {
 
     #[test]
     fn parse_slash_models() {
-        assert_eq!(
-            parse_slash("/models"),
-            Some(SlashCommand::Models { all: false })
-        );
-        assert_eq!(
-            parse_slash("/models all"),
-            Some(SlashCommand::Models { all: true })
-        );
+        assert_eq!(parse_slash("/models"), Some(SlashCommand::Models));
     }
 
     #[test]
