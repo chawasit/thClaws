@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and discussions
+    url: https://github.com/thClaws/thClaws/discussions
+    about: For open-ended questions, ideas, and general chat, please start a discussion instead of filing an issue.
+  - name: Commercial support / Enterprise Edition
+    url: https://agentic-press.com
+    about: For enterprise deployments, custom builds, or commercial support contracts.
