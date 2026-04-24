@@ -36,10 +36,11 @@ wry = { version = "0.54", optional = true }
 # task lists, autolinks. `unsafe_ = false` strips raw HTML (incl. scripts)
 # before we hand it to the sandboxed iframe.
 comrak = { version = "0.29", default-features = false, optional = true }
+rfd = { version = "0.14", optional = true }
 
 [features]
 default = []
-gui = ["dep:tao", "dep:wry", "dep:comrak"]
+gui = ["dep:tao", "dep:wry", "dep:comrak", "dep:rfd"]
 
 [[bin]]
 name = "thclaws-cli"

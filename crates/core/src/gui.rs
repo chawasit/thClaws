@@ -28,6 +28,9 @@ use tao::window::WindowBuilder;
 use wry::http::Response;
 use wry::WebViewBuilder;
 
+/// use native cross-platform crates like rfd (Rust Native File Dialog) rather than spawn shell script
+use rfd::FileDialog;
+
 /// Embed the single-file React frontend (JS+CSS inlined by vite-plugin-singlefile).
 const FRONTEND_HTML: &str = include_str!("../../../frontend/dist/index.html");
 
@@ -597,69 +600,19 @@ fn native_confirm(title: &str, message: &str, yes_label: &str, no_label: &str) -
 /// `None` if the user cancelled. No extra crate dependency — shells out to
 /// the platform's built-in dialog tool.
 fn pick_directory_native(start_dir: &str) -> Option<String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
     {
-        let script = format!(
-            "POSIX path of (choose folder with prompt \"Select working directory\" \
-             default location POSIX file \"{}\")",
-            start_dir.replace('\\', "\\\\").replace('"', "\\\"")
-        );
-        let out = std::process::Command::new("osascript")
-            .args(["-e", &script])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        let path = path.trim_end_matches('/').to_string();
-        if path.is_empty() {
-            None
+        // Returns Option<PathBuf>
+        let optionpathbuf = FileDialog::new()
+            .set_title("Select working directory")
+            .set_directory(start_dir)
+            .pick_folder(); 
+        
+        // Option<PathBuf> to Option<String>
+        if let Some(pathbuf) = optionpathbuf {
+            Some(pathbuf.to_string_lossy().into_owned())
         } else {
-            Some(path)
-        }
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let out = std::process::Command::new("zenity")
-            .args([
-                "--file-selection",
-                "--directory",
-                "--title=Select working directory",
-                &format!("--filename={}/", start_dir),
-            ])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if path.is_empty() {
             None
-        } else {
-            Some(path)
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let ps_start = start_dir.replace('\'', "''");
-        let out = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &format!(
-                "[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null; \
-                 $d = New-Object System.Windows.Forms.FolderBrowserDialog; \
-                 $d.Description = 'Select working directory'; \
-                 $d.SelectedPath = '{ps_start}'; \
-                 if ($d.ShowDialog() -eq 'OK') {{ $d.SelectedPath }} else {{ '' }}")])
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if path.is_empty() {
-            None
-        } else {
-            Some(path)
         }
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
