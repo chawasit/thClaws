@@ -1,0 +1,61 @@
+name: CodeQL — Rust
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/codeql-rust.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/codeql-rust.yml'
+  schedule:
+    - cron: '0 5 * * 1'  # Mondays 05:00 UTC
+
+permissions:
+  security-events: write
+  contents: read
+  actions: read
+  packages: read
+
+jobs:
+  analyze:
+    name: Analyze (Rust)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: codeql-rust-${{ hashFiles('Cargo.lock') }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: rust
+
+      # Build the CLI binary (no GUI deps — webkit2gtk/wry not needed
+      # for CodeQL extraction; GUI surface analyzed via JS/TS path).
+      - name: Cargo build (CLI)
+        run: cargo build --bin thclaws-cli
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:rust"
