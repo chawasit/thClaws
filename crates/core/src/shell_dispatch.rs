@@ -337,10 +337,8 @@ pub async fn dispatch(
                 // (<3 entries — no choice to make) and runtime-loaded
                 // backends (Ollama / LMStudio) whose model lists come
                 // from the live runtime, not the catalogue. Closes #25.
-                let runtime_loaded = matches!(
-                    prov,
-                    "ollama" | "ollama-anthropic" | "lmstudio",
-                );
+                let runtime_loaded =
+                    matches!(prov, "ollama" | "ollama-anthropic" | "lmstudio");
                 if !runtime_loaded {
                     let cat = crate::model_catalogue::EffectiveCatalogue::load();
                     let models = cat.list_models_for_provider(prov);
@@ -361,9 +359,8 @@ pub async fn dispatch(
                             "current": state.config.model,
                             "models": model_rows,
                         });
-                        let _ = events_tx.send(ViewEvent::ModelPickerOpen(
-                            payload.to_string(),
-                        ));
+                        let _ = events_tx
+                            .send(ViewEvent::ModelPickerOpen(payload.to_string()));
                     }
                 }
             } else {
