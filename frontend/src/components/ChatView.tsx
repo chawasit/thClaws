@@ -30,6 +30,7 @@ type Attachment = {
 };
 
 const SUPPORTED_IMAGE_MIME = /^image\/(png|jpeg|jpg|webp|gif)$/;
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 MB per attachment
 
 /// Pull the base64 portion out of a `data:<mime>;base64,<b64>` URL.
 /// FileReader.readAsDataURL hands us the prefixed form; the backend
@@ -61,9 +62,20 @@ export function ChatView() {
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(
     null,
   );
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const copiedTimerRef = useRef<number | null>(null);
+  const errorTimerRef = useRef<number | null>(null);
   const { resolved: themeMode } = useTheme();
+
+  const showAttachmentError = (msg: string) => {
+    setAttachmentError(msg);
+    if (errorTimerRef.current !== null) window.clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = window.setTimeout(() => {
+      setAttachmentError(null);
+      errorTimerRef.current = null;
+    }, 4000);
+  };
 
   const copyMessage = (msg: ChatMessage, index: number) => {
     if (!msg.content) return;
@@ -81,9 +93,22 @@ export function ChatView() {
   /// Add an image File/Blob to the pending-attachments list. Skips any
   /// MIME type the providers don't accept (anything outside
   /// png/jpeg/webp/gif) so the user gets fast feedback rather than a
-  /// 400 from the model on send.
+  /// 400 from the model on send. Also enforces MAX_IMAGE_BYTES to
+  /// avoid a multi-MB clipboard paste freezing the UI during base64
+  /// encoding and ballooning the IPC payload to the backend.
   const addImageBlob = async (blob: Blob) => {
-    if (!SUPPORTED_IMAGE_MIME.test(blob.type)) return;
+    if (!SUPPORTED_IMAGE_MIME.test(blob.type)) {
+      showAttachmentError(
+        `Unsupported image type: ${blob.type || "unknown"} (PNG, JPEG, WebP, GIF only)`,
+      );
+      return;
+    }
+    if (blob.size > MAX_IMAGE_BYTES) {
+      const mb = (blob.size / 1024 / 1024).toFixed(1);
+      const max = MAX_IMAGE_BYTES / 1024 / 1024;
+      showAttachmentError(`Image too large: ${mb} MB (max ${max} MB)`);
+      return;
+    }
     try {
       const data = await blobToBase64(blob);
       const previewUrl = `data:${blob.type};base64,${data}`;
@@ -249,6 +274,9 @@ export function ChatView() {
       if (copiedTimerRef.current !== null) {
         window.clearTimeout(copiedTimerRef.current);
       }
+      if (errorTimerRef.current !== null) {
+        window.clearTimeout(errorTimerRef.current);
+      }
     };
   }, []);
 
@@ -378,6 +406,15 @@ export function ChatView() {
                   // strikethrough, task lists). rehype-highlight runs
                   // syntax highlighting against fenced code blocks —
                   // styled by the .hljs-* rules in index.css.
+                  //
+                  // SECURITY: msg.content is untrusted (model output).
+                  // The pipeline above is the safe stack — no
+                  // allowDangerousHtml, no allowSvg, no rehype-raw.
+                  // rehype-highlight is a CSS-class applier (no code
+                  // execution); fenced-code language IDs flow into it
+                  // unchecked but are rendered as text. Don't add HTML
+                  // pass-through plugins or dangerouslySetInnerHTML
+                  // here without rethinking that threat model.
                   <div className="markdown-body">
                     <ReactMarkdown
                       remarkPlugins={[remarkGfm]}
@@ -414,6 +451,21 @@ export function ChatView() {
           transition: "border-color 0.12s, border-width 0.12s",
         }}
       >
+        {/* Attachment error banner — auto-clears after 4s */}
+        {attachmentError && (
+          <div
+            role="alert"
+            className="text-xs px-2 py-1 rounded"
+            style={{
+              background: "var(--bg-error, rgba(220, 38, 38, 0.12))",
+              color: "var(--text-error, #f87171)",
+              border: "1px solid var(--border-error, rgba(220, 38, 38, 0.3))",
+            }}
+          >
+            {attachmentError}
+          </div>
+        )}
+
         {/* Pending image attachments */}
         {attachments.length > 0 && (
           <div className="flex flex-wrap gap-2">

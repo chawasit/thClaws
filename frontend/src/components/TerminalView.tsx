@@ -188,13 +188,30 @@ export function TerminalView({ active }: Props) {
           if (msg.type === "clipboard_text") {
             unsub();
             if (!msg.ok) return;
+            // Cap on paste size — atob() and TextDecoder are sync and
+            // freeze the main thread on multi-MB inputs. 1 MB binary
+            // is ~1.33 MB base64; round up the b64 ceiling for safety.
+            const MAX_PASTE_BYTES = 1 * 1024 * 1024;
+            const MAX_PASTE_B64 = Math.ceil((MAX_PASTE_BYTES * 4) / 3);
             let text = "";
             if (typeof msg.text_b64 === "string") {
+              if (msg.text_b64.length > MAX_PASTE_B64) {
+                console.warn(
+                  `[paste] clipboard too large (${msg.text_b64.length} b64 bytes); ignoring`,
+                );
+                return;
+              }
               const bin = atob(msg.text_b64 as string);
               const bytes = new Uint8Array(bin.length);
               for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
               text = new TextDecoder("utf-8").decode(bytes);
             } else if (typeof msg.text === "string") {
+              if (msg.text.length > MAX_PASTE_BYTES) {
+                console.warn(
+                  `[paste] clipboard too large (${msg.text.length} bytes); ignoring`,
+                );
+                return;
+              }
               text = msg.text as string;
             }
             if (text.length > 0) {
