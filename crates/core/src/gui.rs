@@ -1100,7 +1100,18 @@ pub fn run_gui() {
                     // data is the base64 of the raw image bytes (no
                     // data: prefix). Only the chat tab emits this
                     // field; the terminal tab never has attachments.
-                    let attachments: Vec<(String, String)> = msg
+                    //
+                    // Caps below are defense-in-depth against a
+                    // malicious / buggy frontend bypassing the
+                    // ChatView per-image 10 MB cap. With both caps,
+                    // the worst-case payload is bounded at ~67 MB
+                    // base64 (50 MB raw) per IPC message, which the
+                    // agent can ingest without OOM on common dev
+                    // hardware.
+                    const MAX_ATTACHMENTS_PER_MESSAGE: usize = 10;
+                    const MAX_ATTACHMENTS_TOTAL_B64_BYTES: usize = 67 * 1024 * 1024;
+
+                    let mut attachments: Vec<(String, String)> = msg
                         .get("attachments")
                         .and_then(|v| v.as_array())
                         .map(|arr| {
@@ -1121,6 +1132,24 @@ pub fn run_gui() {
                                 .collect()
                         })
                         .unwrap_or_default();
+
+                    if attachments.len() > MAX_ATTACHMENTS_PER_MESSAGE {
+                        eprintln!(
+                            "[ipc chat_user_message] dropping {} attachments over the {}-per-message cap",
+                            attachments.len() - MAX_ATTACHMENTS_PER_MESSAGE,
+                            MAX_ATTACHMENTS_PER_MESSAGE,
+                        );
+                        attachments.truncate(MAX_ATTACHMENTS_PER_MESSAGE);
+                    }
+                    let total_b64: usize =
+                        attachments.iter().map(|(_, d)| d.len()).sum();
+                    if total_b64 > MAX_ATTACHMENTS_TOTAL_B64_BYTES {
+                        eprintln!(
+                            "[ipc chat_user_message] attachments total {} bytes (b64) exceed {} cap; dropping all",
+                            total_b64, MAX_ATTACHMENTS_TOTAL_B64_BYTES,
+                        );
+                        attachments.clear();
+                    }
 
                     if !attachments.is_empty() {
                         let _ = shared_for_ipc.input_tx.send(ShellInput::LineWithImages {
