@@ -33,6 +33,7 @@ const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1/models";
 const ANTHROPIC_URL: &str = "https://api.anthropic.com/v1/models";
 const OPENAI_URL: &str = "https://api.openai.com/v1/models";
 const GEMINI_URL: &str = "https://generativelanguage.googleapis.com/v1beta/models";
+const OLLAMA_CLOUD_URL: &str = "https://ollama.com/v1/models";
 const DEFAULT_TARGET: &str = "crates/core/resources/model_catalogue.json";
 
 // ── Wire types ──────────────────────────────────────────────────────
@@ -231,6 +232,45 @@ async fn run() -> Result<String, String> {
         }
     } else {
         report.push("  gemini:      skipped (no GEMINI_API_KEY)".into());
+    }
+
+    // 4. Ollama Cloud — OpenAI-compatible /v1/models lists the cloud
+    //    catalog (NOT the user's local Ollama; that one needs a local
+    //    daemon to be running). Each id needs the `ollama-cloud/` prefix
+    //    before merging because that's how thClaws routes cloud models
+    //    distinctly from local Ollama (which uses `ollama/` prefix).
+    if let Ok(key) = std::env::var("OLLAMA_CLOUD_API_KEY") {
+        match fetch_ollama_cloud(&key).await {
+            Ok(ids) => {
+                let prefixed: Vec<String> = ids
+                    .into_iter()
+                    .map(|id| format!("ollama-cloud/{id}"))
+                    .collect();
+                // Seed the provider entry with a sensible default context
+                // so merge_discovered doesn't skip rows for "no context".
+                // 262144 covers most current cloud models; specific rows
+                // can be hand-bumped later (e.g. deepseek-v4-flash at 1M).
+                let pc = cat
+                    .providers
+                    .entry("ollama-cloud".into())
+                    .or_insert_with(ProviderCatalogue::default);
+                if pc.default_context.is_none() {
+                    pc.default_context = Some(262144);
+                }
+                let added = merge_discovered(
+                    &mut cat,
+                    "ollama-cloud",
+                    OLLAMA_CLOUD_URL,
+                    prefixed,
+                    &openrouter_ctx_by_bare,
+                    &today,
+                );
+                push_provider_stats(&mut report, "ollama-cloud", &added, None);
+            }
+            Err(e) => report.push(format!("  ollama-cloud: FAILED ({e})")),
+        }
+    } else {
+        report.push("  ollama-cloud: skipped (no OLLAMA_CLOUD_API_KEY)".into());
     }
 
     cat.source = format!("baseline {today}");
@@ -480,6 +520,27 @@ async fn fetch_openai(key: &str) -> Result<Vec<String>, String> {
         .map_err(|e| format!("GET {OPENAI_URL}: {e}"))?;
     if !resp.status().is_success() {
         return Err(format!("openai HTTP {}", resp.status()));
+    }
+    let env: OpenAIEnvelope = resp.json().await.map_err(|e| format!("json: {e}"))?;
+    Ok(env.data.into_iter().map(|m| m.id).collect())
+}
+
+/// Fetch the cloud catalog from Ollama Cloud's OpenAI-compatible
+/// `/v1/models` endpoint. Returns bare model ids (e.g. `kimi-k2.5`,
+/// `gpt-oss:120b`) — caller adds the `ollama-cloud/` prefix to namespace
+/// them in the catalogue. The same key works against `/api/tags` for
+/// richer metadata (size, modified_at) but we don't currently consume
+/// those fields, and the OpenAI-compatible shape lets us reuse
+/// OpenAIEnvelope without a new struct.
+async fn fetch_ollama_cloud(key: &str) -> Result<Vec<String>, String> {
+    let resp = client()?
+        .get(OLLAMA_CLOUD_URL)
+        .bearer_auth(key)
+        .send()
+        .await
+        .map_err(|e| format!("GET {OLLAMA_CLOUD_URL}: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("ollama-cloud HTTP {}", resp.status()));
     }
     let env: OpenAIEnvelope = resp.json().await.map_err(|e| format!("json: {e}"))?;
     Ok(env.data.into_iter().map(|m| m.id).collect())
