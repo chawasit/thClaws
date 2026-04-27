@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added — `OpenAICompat` provider
+## [0.6.1] — 2026-04-27
+
+Patch release. Three community PRs landed in quick succession after
+v0.6.0 — a real cost optimization, a contributor-experience improvement,
+and a new provider variant. All three fully tested, no breaking changes.
+
+### Added — `OpenAICompat` provider ([#35](https://github.com/thClaws/thClaws/pull/35), [@SalmonRK](https://github.com/SalmonRK))
 
 A first-class slot for generic OpenAI-compatible HTTP endpoints — LLM
 gateways like LiteLLM, Portkey, Helicone, internal corporate proxies,
@@ -21,27 +27,6 @@ or Settings UI), Bearer token from `OPENAI_COMPAT_API_KEY`, and a
 `oai/<id>` model prefix that is stripped before the request reaches
 the upstream. Real OpenAI (`OPENAI_API_KEY` + `gpt-*` / `o*` models)
 is unaffected — there is no env-var collision and no slot shadowing.
-
-- `crates/core/src/providers/mod.rs` — new `ProviderKind::OpenAICompat`
-  variant with full method coverage (`name`, `default_model`,
-  `endpoint_env`, `endpoint_user_configurable`, `default_endpoint`,
-  `api_key_env`, `resolve_alias_for_provider`, `detect`, `ALL`).
-  Detect prefix is `oai/`, name is `openai-compat`.
-- `crates/core/src/repl.rs` — `build_provider()` arm constructs an
-  `OpenAIProvider` with `with_base_url(...)` and
-  `with_strip_model_prefix("oai/")`.
-- `crates/core/src/secrets.rs` — added to the `MANAGED` keychain
-  bundle list so the API key is stored alongside other auth-required
-  providers (one keychain prompt, not N).
-- `crates/core/src/model_catalogue.rs` — `provider_kind_name()`
-  mapping so `/models refresh` dedicates a `openai-compat` block.
-- `frontend/src/components/SettingsModal.tsx` — `PROVIDER_LABELS`
-  entry; the existing generic `endpoint_status` / `endpoint_set` IPC
-  handlers automatically render a Base URL + API Key card because
-  `endpoint_user_configurable()` is true.
-- New test `config::tests::detect_provider_covers_openai_compat`
-  plus an extended assertion in `secrets::tests::status_lists_known_providers`.
-  502 lib tests pass.
 
 Usage:
 
@@ -57,6 +42,74 @@ export OPENAI_COMPAT_API_KEY=...
 The `oai/` prefix is stripped before the wire payload, so an upstream
 model named `meta-llama/Llama-3.1-70B-Instruct` is reached via
 `/model oai/meta-llama/Llama-3.1-70B-Instruct`.
+
+### Added — Anthropic third cache breakpoint ([#33](https://github.com/thClaws/thClaws/pull/33), [@chawasit](https://github.com/chawasit))
+
+Adds a `cache_control: ephemeral` marker on the last content block of
+the second-to-last message in `AnthropicProvider::build_body`, turning
+the rolling conversation history into a cached prefix on subsequent
+turns. The newest message stays uncached (it's the live user turn);
+the one before it is byte-stable across the next call and becomes the
+cache anchor.
+
+Anthropic supports up to 4 `cache_control` markers per request. Before
+this change we used 2 (system prompt + last tool definition); both
+cached *fixed-size* blocks. The growing conversation history was
+re-tokenized in full on every turn even though everything except the
+newest user message was byte-stable across the next call.
+
+Approximate input-cost reductions on Sonnet 4.6 vs. the prior
+2-breakpoint setup:
+
+| Session length × shape | Saving vs. 2 breakpoints |
+|---|---|
+| 10 turns, normal coding | ~46% |
+| 10 turns, tool-heavy | ~54% |
+| 30 turns, normal coding | ~74% |
+
+Break-even is one cache hit: the 25% write surcharge is recovered
+the next time the cached prefix is reused at 90% off. Anthropic's
+1024-token minimum-cacheable-prefix floor is enforced server-side;
+the client adds the marker only when the history has at least 3
+messages (a soft-skip so the breakpoint slot isn't burned on
+sub-1024-token histories that almost certainly won't qualify).
+
+Three new tests cover the positive case, the short-history guard,
+and a byte-stability invariant guarding against silent cache busts
+from non-deterministic field ordering.
+
+### Added — `scripts/build.{sh,ps1}` build helpers ([#34](https://github.com/thClaws/thClaws/pull/34), [@chawasit](https://github.com/chawasit))
+
+One-shot cross-platform build helpers. Default behavior: build the
+frontend (`pnpm install` + `pnpm build`), then `cargo build --features
+gui`. The Rust GUI build embeds `frontend/dist/index.html` at compile
+time, so a bare `cargo build --features gui` without a prior frontend
+build fails with a confusing missing-file error from `include_str!`.
+The helpers enforce the order and surface a clear "you forgot to build
+the frontend" message instead.
+
+| `bash` | `PowerShell` | Effect |
+|---|---|---|
+| `scripts/build.sh` | `scripts/build.ps1` | debug build (frontend + cargo) |
+| `--release` | `-Release` | release profile |
+| `--no-frontend` | `-NoFrontend` | skip pnpm steps; assume `frontend/dist` exists |
+| `--check` | `-Check` | full verification suite (`cargo fmt --check`, `clippy -- -D warnings`, `pnpm tsc --noEmit`, `cargo test`) |
+
+Includes a `.gitattributes` that pins `*.sh` to LF and PowerShell /
+batch files to CRLF so the bash script stays executable on Linux/macOS
+even when the repo is checked out on Windows with `core.autocrlf=true`.
+Without this, every Windows checkout would mangle the bash script's
+shebang line and break it on POSIX hosts.
+
+### Internal cleanup
+
+- Two `clippy` warnings in `crates/core/build.rs` cleaned up
+  (`collapsible_str_replace`, `manual_div_ceil`) — these were
+  pre-existing from the v0.5.0 Phase 0 EE work and were noted in
+  the PR descriptions of #33 and #34. `cargo clippy --fix` also
+  applied 8 mechanical fixes across `repl.rs`, `skills.rs`,
+  `providers/mod.rs`, `model_catalogue.rs`, `sso/discovery.rs`, and
+  `bin/catalogue_seed.rs`. **505 lib tests pass.**
 
 ## [0.6.0] — 2026-04-27
 
